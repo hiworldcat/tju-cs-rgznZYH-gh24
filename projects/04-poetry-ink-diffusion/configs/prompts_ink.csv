@@ -1,0 +1,5 @@
+id,prompt,negative_prompt
+jiangxue,"孤舟蓑笠翁，独钓寒江雪，Chinese ink wash painting, lone boat on cold river, snow, mist, xuan paper texture, monochrome, elegant composition","low quality, blurry, text, watermark, extra limbs, oversaturated, western oil painting"
+wanglushan,"日照香炉生紫烟，遥看瀑布挂前川，Chinese ink wash landscape, high waterfall, mountain mist, sparse pine trees, rice paper","low quality, blurry, text, watermark, noisy, photorealistic"
+chunxiao,"春眠不觉晓，处处闻啼鸟，Chinese ink wash painting, spring village morning, soft rain, birds, light ink wash","low quality, blurry, text, watermark, crowded composition"
+zaofa,"两岸猿声啼不住，轻舟已过万重山，Chinese ink wash painting, fast boat between green mountains, poetic river, mist","low quality, blurry, text, watermark, modern city"

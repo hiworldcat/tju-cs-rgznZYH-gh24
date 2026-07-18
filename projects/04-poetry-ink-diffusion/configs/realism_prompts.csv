@@ -1,0 +1,3 @@
+id,prompt,negative_prompt
+real_lake,"A realistic high-resolution landscape photo of a quiet lake at sunrise, soft fog, natural colors, detailed mountains","low quality, blurry, painting, cartoon, text, watermark"
+real_street,"A realistic documentary photo of an old stone street after rain, natural light, detailed texture","low quality, blurry, illustration, anime, text, watermark"

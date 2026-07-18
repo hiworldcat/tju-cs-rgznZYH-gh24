@@ -1,0 +1,442 @@
+\documentclass[12pt,a4paper]{article}
+
+% 中文支持
+\usepackage[UTF8]{ctex}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+
+% 页面设置
+\usepackage{geometry}
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% 行距设置 18磅 约等于 1.3 倍行距
+\usepackage{setspace}
+\setstretch{1.3}
+
+% 图表与数学公式
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{float}
+\usepackage{xcolor}
+
+% 段落格式
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0pt}
+
+% 标题
+\title{\heiti\zihao{2} 从文本到声景：\\基于潜在扩散模型的音频生成技术演进与前沿调研}
+\author{\kaishu\zihao{4} Anonymous \\ School of Electronics and Information Engineering}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\newpage
+
+% -----------------------------------------------------------
+% 摘要
+% -----------------------------------------------------------
+\begin{abstract}
+生成式人工智能近年来在视觉与语言领域取得了突破性进展，而音频生成作为多模态智能的关键一环，正成为新的研究热点。本文系统调研了从文本描述生成音频（Text-to-Audio, TTA）的技术演进路线。首先，回顾了去噪扩散概率模型（DDPM）与离散扩散模型（D3PM）、变分自编码器（VAE）及其向量量化变体（VQ-VAE）等生成式核心理论，并总结了 Transformer 架构、CLIP/CLAP 以及 T5 等模型在多模态对齐与语义编码中的基础作用。在此基础上，本文以时间线为轴，深入剖析了 DiffSound、AudioLDM、AudioLDM 2、Make-An-Audio 系列、Tango 及 AudioGen 等代表性 TTA 模型的设计理念、技术架构与性能优劣。通过横向对比，本文凝练出“从像素空间向潜在空间跃迁”、“从单模态生成向多模态联合表征融合”以及“从通用生成向高保真、可控生成演进”三大前沿趋势。最后，本文探讨了 TTA 技术在影视音效、虚拟现实及无障碍视听辅助等领域的应用前景，并对其面临的数据版权、可控性及评估体系挑战进行了分析与思辨。本调研旨在为生成式人工智能在跨模态内容创作领域的研究提供一份结构清晰、逻辑连贯的技术参考。
+
+\noindent\textbf{关键词：}文本到音频生成；潜在扩散模型；AudioLDM；DDPM；多模态学习；生成式人工智能
+\end{abstract}
+
+% -----------------------------------------------------------
+% 1 引言
+% -----------------------------------------------------------
+\section{引言}
+
+在人工智能的诸多分支中，生成式模型的终极梦想是赋予机器“无中生有”的创作能力。近年来，随着 Stable Diffusion、Midjourney 等文本到图像（Text-to-Image）模型的惊艳表现，以及 ChatGPT 在文本生成领域的颠覆性影响，多模态生成的下一个“杀手级应用”正在毫无悬念地指向听觉维度——文本到音频生成（Text-to-Audio, TTA）。与传统的文本到语音（Text-to-Speech, TTS）仅限于合成人类朗读语音不同，TTA 旨在根据任意的自由文本描述，生成与之语义高度对齐的复杂音频事件、环境声景乃至音乐片段。
+
+TTA 技术的核心矛盾在于：音频信号具有极高的时间分辨率（通常为每秒 16000 甚至更高采样点）和极其复杂的频谱结构，如何让机器在理解“雨夜中汽车的呼啸声与远处雷声交织”这样高语义密度的文本后，合成高保真且时序逻辑合理的音频？这一任务要求模型不仅要捕捉不同声源的频谱特征，还要理解事件之间的时序驱动关系以及正确的空间布局。本文的调研正是围绕这一挑战展开。文章首先系统梳理构成现代 TTA 系统基石的关键技术，包括 DDPM、D3PM、VAE 及其变体、Transformer 以及 CLIP 等；随后，按技术发展路径，先后剖析 DiffSound 的离散空间尝试、AudioLDM 的潜在扩散范式、AudioLDM 2 的联合语义升华，以及 Make-An-Audio 与 Tango 等在生成质量与速度上的极致优化，并辅以 AudioGen 的专有数据视角。最后，本文将提炼当前技术演进的内在逻辑，并对未来趋势与应用进行展望。
+
+% -----------------------------------------------------------
+% 2 基础理论与关键组件
+% -----------------------------------------------------------
+\section{基础理论与关键组件}
+
+现代 TTA 系统并非凭空产生，而是建立在深度生成模型与跨模态表征学习的坚实基石之上。为深刻理解后面诸多前沿模型的设计动机与内部机制，本章将详细解析构成这些系统骨架的核心技术。
+
+\subsection{生成模型的范式转移：从 AE 到 VQ-VAE}
+
+\subsubsection{自编码器与变分自编码器}
+最基础的自编码器（Autoencoder, AE）由编码器和解码器组成，通过瓶颈层（Bottleneck）将高维输入数据 \(x\) 压缩为低维隐变量 \(z\)，再由解码器重构出 \(\hat{x}\)。通过最小化重构误差 \( \mathcal{L} = \| x - \hat{x} \|^2 \)，AE 能够学习到数据的非线性低维流形。然而，标准 AE 的隐空间通常缺乏规则性，难以直接采样生成新样本。
+
+变分自编码器（Variational Autoencoder, VAE）于 2014 年由 Kingma 和 Welling 提出，从根本上改变了隐空间的建模方式。VAE 并不直接将输入映射为确定的隐变量，而是将其编码为一组参数（均值 \(\mu\) 和方差 \(\sigma\)），迫使隐变量服从预设的先验分布（通常为标准正态分布 \( \mathcal{N}(0,1) \)）。其优化目标由重构损失与 KL 散度正则项共同构成：
+\begin{equation}
+\mathcal{L}_{\text{VAE}} = \mathbb{E}_{q(z|x)}[\log p(x|z)] - D_{\text{KL}} \big( q(z|x) \| p(z) \big)
+\end{equation}
+通过重参数化技巧（Reparameterization Trick），VAE 实现了端到端的随机梯度下降训练。然而，标准 VAE 生成样本往往较为模糊，这在很大程度上归因于其假设隐变量服从简单的连续高斯分布，且逐像素的 MSE 损失倾向于生成平滑的平均结果。
+
+\subsubsection{VQ-VAE 与离散隐空间}
+为了进一步提升生成质量，Oord 等人在 2017 年提出了向量量化变分自编码器（Vector Quantised-VAE, VQ-VAE）。其核心思想是将连续隐变量离散化：首先维持一个可学习的码本（Codebook） \( \mathcal{C} = \{e_1, e_2, \dots, e_K\} \)，其中每一个码本向量 \(e_i\) 都是一个固定大小的嵌入向量。对于编码器产生的连续隐变量 \(z_e(x)\)，VQ-VAE 通过最近邻查找，将其量化为距离最近的码本向量 \(e_k\)：
+\begin{equation}
+\text{Quantize}(z_e(x)) = e_k, \quad \text{where} \quad k = \arg\min_j \| z_e(x) - e_j \|_2
+\end{equation}
+解码器此后仅根据量化后的离散索引序列（即码本编号）重构原始信号。训练时，通过直通估计器（Straight-Through Estimator）将解码器梯度直接复制回编码器，同时引入码本损失和承诺损失来更新码本向量。
+
+VQ-VAE 的离散特性与音频、语言等模态天然契合：它将连续的高维信号压缩为紧凑的离散 Token 表示，为后续应用自回归模型（如 PixelCNN、Transformer）或离散扩散模型（D3PM）在离散隐空间中进行生成奠定了基石，成为 DiffSound 和 AudioGen 等早期 TTA 模型的重要技术源头。
+
+\subsection{扩散模型的全面统治：DDPM 与 D3PM}
+
+\subsubsection{去噪扩散概率模型}
+去噪扩散概率模型（Denoising Diffusion Probabilistic Models, DDPM）由 Ho 等人在 2020 年正式确立为一类极高质量的生成范式，其灵感源于非平衡热力学。DDPM 定义了两个相反的马尔可夫过程：
+
+一是固定的\emph{正向扩散过程}（Forward Process），从真实数据分布 \(x_0 \sim q(x_0)\) 出发，在 \(T\) 个时间步内逐步向其中添加各向同性的高斯噪声：
+\begin{equation}
+q(x_t | x_{t-1}) = \mathcal{N} \big( x_t; \sqrt{1 - \beta_t} x_{t-1}, \beta_t \mathbf{I} \big)
+\end{equation}
+其中 \(\beta_t \in (0,1)\) 是预定义的噪声调度。当 \(T \to \infty\) 时，\(x_T\) 将渐近为一纯各向同性高斯分布。
+
+二是\emph{逆向去噪过程}（Reverse Process），模型学习一个从纯噪声开始逐步去噪直至恢复出数据 \(x_0\) 的神经网络参数化高斯转移：
+\begin{equation}
+p_\theta(x_{t-1} | x_t) = \mathcal{N} \big( x_{t-1}; \mu_\theta(x_t, t), \Sigma_\theta(x_t, t) \big)
+\end{equation}
+训练目标通常被简化为预测在噪声样本 \(x_t\) 中所添加的噪声 \(\epsilon\)：
+\begin{equation}
+\mathcal{L}_{\text{simple}} = \mathbb{E}_{t, x_0, \epsilon} \big[ \| \epsilon - \epsilon_\theta(x_t, t) \|^2 \big]
+\end{equation}
+
+DDPM 相比生成对抗网络（GAN）具有训练稳定、模式覆盖更全面的优势。精细的去噪过程使得 DDPM 能够捕捉到复杂数据中的多尺度结构，尤其对于音频这种需要细粒度时频一致性的模态至关重要。于是，后续几乎所有高质量 TTA 模型（AudioLDM、Make-An-Audio、Tango）均采用 DDPM 或其潜在空间版本 LDM 作为基底生成器。
+
+\subsubsection{离散扩散模型}
+标准 DDPM 面向连续实值数据。Austin 等人于 2021 年提出的 D3PM（Discrete Denoising Diffusion Probabilistic Models）则将扩散过程拓展到离散范畴。在 D3PM 中，正向过程不再添加高斯噪声，而是通过定义状态转移矩阵 \(\mathbf{Q}_t\)，以一定概率在词表（或码本索引）之间跳转：
+\begin{equation}
+q(x_t | x_{t-1}) = \text{Cat} \big( x_t; x_{t-1} \mathbf{Q}_t \big)
+\end{equation}
+例如，可以选择“均匀转移”策略，使任一离散 Token 以某个概率均匀地转移为码本中的其他任意 Token，或以某个概率保留自身。
+
+逆向过程同样使用神经网络预测真实的去噪分布。由于 VQ-VAE 已将音频编码为离散码本索引序列，D3PM 能够直接在这些离散 Token 上执行扩散过程，这一点被 DiffSound 最早引入 TTA 领域，用离散扩散模型在有限的离散码本空间内进行生成尝试。
+
+\subsection{Transformer 与序列建模}
+
+Transformer 架构自 2017 年由 Vaswani 等人提出以来，凭借自注意力（Self-Attention）机制从根本上重塑了序列建模的范式。与依赖循环或卷积的顺序归纳偏置不同，自注意力通过对序列中所有位置两两交互的直接建模，天然能够捕捉全局的长程依赖：
+\begin{equation}
+\text{Attention}(Q, K, V) = \text{softmax} \left( \frac{QK^T}{\sqrt{d_k}} \right) V
+\end{equation}
+
+在音频生成领域，Transformer 的角色体现在两个层面：
+第一，\textbf{文本编码器}：无论是 CLIP 还是 T5，其文本塔（Text Encoder）几乎全部基于堆叠的 Transformer 层，用以提取文本的深层语义与句法信息。
+第二，\textbf{去噪骨干网络}：如 AudioGen 摒弃了经典的卷积 U-Net，直接采用纯 Transformer 自回归架构预测离散音频 Token；而即便是在使用 U-Net 的潜在扩散模型中，U-Net 的基本模块也逐步引入了 Transformer（如 Self-Attention 和 Cross-Attention 层），用于将文本条件注入生成过程。因此，Transformer 构成了 TTA 系统在语义理解与结构生成两端的通用建模语言。
+
+\subsection{跨模态语义对齐：CLIP/CLAP 与 T5}
+
+\subsubsection{CLIP 与 CLAP}
+OpenAI 于 2021 年提出的 CLIP（Contrastive Language–Image Pre-training）通过在 4 亿图文对上训练双塔对比学习模型，将文本和图像映射到统一的语义嵌入空间。其训练采用批内对比损失，最大化正确图文对的余弦相似度，同时最小化错误对之间的相似度。
+
+受到 CLIP 的成功启发，音频-文本的 CLAP（Contrastive Language–Audio Pretraining）模型应运而生。CLAP 用音频编码器替代图像编码器，与文本编码器一同在大规模音频-文本描述数据上进行对比学习预训练。在 TTA 任务中，CLAP 承担了“语义桥梁”的作用：它将用户输入的文本描述投影到一个富含声学语义的连续向量中，该向量随后作为扩散模型的条件，指导生成过程。AudioLDM 正是依靠 CLAP 实现了无需成对标注数据的“无监督”生成范式。
+
+\subsubsection{T5 与指令型文本编码}
+与 CLAP 通过对比学习获取音频匹配表征不同，另一条路线是直接利用大规模预训练的纯文本语言模型作为编码器。Google 的 T5（Text-to-Text Transfer Transformer）将所有自然语言处理任务统一为文本到文本的格式，通过在海量语料上的预训练，获得了极强的语言理解和常识推理能力。其指令微调版本 Flan-T5 更是在多种任务中展现出优异的零样本指令遵循能力。
+
+Tango 模型率先看中了 Flan-T5 的潜力，直接使用它作为 TTA 的文本编码器，冻住其参数，将输出的文本嵌入注入扩散模型。这种方法使得 Tango 能够精准地解析“先是鸟鸣，然后汽车驶过”等具有严格时序关系的复杂指令，展现出单纯的 CLAP 全局语义嵌入难以匹敌的逻辑对齐能力。此“文本中心”路线与“CLAP 对齐”路线共同构成了当前 TTA 文本编码的两大主流范式。
+
+% -----------------------------------------------------------
+% 3 文本到音频生成模型的技术演进
+% -----------------------------------------------------------
+% -----------------------------------------------------------
+% 3 文本到音频生成模型的技术演进
+% -----------------------------------------------------------
+\section{文本到音频生成模型的技术演进}
+
+基于上述基石，TTA 模型在近几年进入了爆发期。本章将按时间顺序与逻辑递进关系，深入探讨七款代表模型的核心原理、关键创新与局限性，并重点剖析其如何在扩散空间、语义对齐和架构设计之间做出精妙权衡。
+
+\subsection{离散空间的早期探索：DiffSound}
+
+\textbf{DiffSound} 由 Yang 等人于 2023 年提出，是早期将离散扩散模型引入文本到声音生成领域的开创性工作。其核心思想可概括为“VQ-VAE 压缩 + D3PM 生成”的二级流水线。
+
+\subsubsection{模型原理与架构}
+在训练第一阶段，DiffSound 首先训练一个 VQ-VAE 模型，将音频的梅尔频谱图压缩为一组离散的码本索引序列。具体而言，编码器将输入的梅尔频谱 \(X \in \mathbb{R}^{T \times F}\) 映射为连续的隐变量序列 \(Z_e = [z_e^{(1)}, z_e^{(2)}, \dots, z_e^{(L)}]\)，随后通过最近邻查找将每一帧隐变量量化为码本中最接近的向量索引 \(k^{(i)} = \arg\min_j \| z_e^{(i)} - e_j \|_2\)。解码器则仅根据这些离散索引重构出原始梅尔频谱。通过精心的码本设计（通常包含数百到数千个码本向量），VQ-VAE 能够在保留音频主要声学特征的同时，将数据压缩为高度紧凑的离散表示。
+
+在训练第二阶段，DiffSound 将预训练好的 VQ-VAE 的解码器固定，转而在离散码本索引序列上训练一个条件离散扩散模型（D3PM）。正向过程将真实的码本索引序列逐步腐蚀：在每个扩散时间步，按照预定义的转移矩阵 \(Q_t\)，以概率 \(\beta_t\) 将每个位置的 Token 随机替换为码本中的其他任意 Token，或者替换为一个特殊的 [MASK] 吸收态 Token。经过 \(T\) 步后，序列退化为纯粹的噪声或全掩码状态。逆向过程则训练一个基于 Transformer 的去噪网络 \(\theta\)，该网络以当前时刻的噪声序列 \(x_t\)、时间步嵌入 \(t\) 以及文本条件 \(c\) 作为输入，预测原始干净序列 \(p_\theta(x_0 | x_t, t, c)\)，进而通过贝叶斯公式推导出逆向转移分布 \(p_\theta(x_{t-1} | x_t, t, c)\)。
+
+文本条件 \(c\) 由预训练的 CLIP 文本编码器提取，通过交叉注意力机制注入 Transformer 的每一层。
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 1: DiffSound 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{DiffSound 模型整体架构：VQ-VAE 将梅尔频谱量化为离散Token序列，D3PM在离散空间执行条件扩散生成。（图片待插入）}
+\label{fig:diffsound}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+DiffSound 的核心贡献在于首次验证了“离散扩散模型 + 音频 Tokenization”这一技术路线在 TTA 任务中的可行性。相较于传统的自回归模型（如 WaveNet），D3PM 通过并行的非自回归生成方式，在推理时能够一次性处理整个序列，从而在保持生成质量的同时显著提升了效率。此外，D3PM 在离散空间中的采样灵活性——例如可以在某些时间步强制保持部分 Token 不变——为后续的可控生成研究提供了天然接口。
+
+\subsubsection{局限性分析}
+然而，DiffSound 的缺陷同样鲜明。其一，VQ-VAE 的离散化压缩不可避免地带来信息损失：码本尺寸有限，对于那些需要精细刻画高频谐波、瞬态冲击和复杂纹理的音频事件（如玻璃碎裂、流水潺潺），量化后的 Token 序列往往丢失了关键的细节，导致生成音频出现“机械感”和“糊化”。其二，文本条件仅由基础的 CLIP 编码器提供，缺乏对复杂时序描述（如“先是……然后……”）的细粒度解析能力，语义对齐精度有限。其三，离散 Token 空间的搜索代价随码本尺寸增大而急剧膨胀，限制了模型对更丰富声学词汇的表征能力。这些局限性直接催生了后续 AudioLDM 等模型从离散空间向连续潜在空间的范式转移。
+
+\subsection{离散空间的另一路径：AudioGen}
+
+\textbf{AudioGen} 由 Meta（Kreuk 等人）于 2023 年在 ICLR 发表，与 DiffSound 共享“音频离散化”的根本前提，但在生成架构上选择了截然不同的路径——它彻底拥抱了自回归 Transformer，而非扩散模型。
+
+\subsubsection{模型原理与架构}
+AudioGen 的流水线同样分为两个阶段。第一阶段，它使用一个压缩自编码器将原始音频波形编码为离散的 Token 序列。与 DiffSound 基于梅尔频谱的 VQ-VAE 不同，AudioGen 采用了 EnCodec 作为音频 Tokenizer。EnCodec 是一个基于残差向量量化（Residual Vector Quantization, RVQ）的神经音频编解码器，能够在极低的比特率下保持令人满意的音频重建质量。RVQ 的层级量化结构意味着每个音频帧被表示为一组多层级的码本索引，这些索引共同捕获从粗粒度轮廓到细粒度纹理的声学信息。
+
+第二阶段，AudioGen 摒弃了扩散模型的迭代去噪机制，转而训练一个纯 Transformer 自回归解码器。该模型将音频生成任务严格塑形为“语言建模”问题：给定文本条件 \(T\) 和已经生成的前缀音频 Token 序列 \(A_{<t}\)，模型学习预测下一个音频 Token 的条件概率分布 \(p(A_t | A_{<t}, T)\)。文本条件通过一个预训练的 T5 文本编码器提取为连续嵌入，在进入 Transformer 时与音频 Token 嵌入进行交互。为了处理多层级的 RVQ Token，AudioGen 采用了“扁平化”策略——将不同层级的码本索引按特定顺序交织排列，使单个 Transformer 能够统一建模所有层级的依赖关系。
+
+在数据层面，AudioGen 重视训练语料的构建。团队从公开数据源中收集了大量标注音频，并开发了一套文本规范化流程：使用大语言模型将原始标注改写为统一风格的完整句子，滤除过于简短或噪声严重的标注。这种做法有效提升了训练数据的质量，减少了模型对文本风格差异的过拟合。
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 2: AudioGen 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{AudioGen 模型整体架构：EnCodec将音频编码为多层离散Token，自回归Transformer逐Token预测生成。（图片待插入）}
+\label{fig:audiogen}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+AudioGen 的最大创新在于用自回归 Transformer 将 TTA 任务完全形式化为序列生成问题。这一选择带来的直接优势是模型能够自然捕捉音频事件的长程时序依赖——Transformer 的自注意力机制在全序列上计算关联，理论上能够学到“鸟鸣声由远及近”或“汽车引擎启动后渐行渐远”等需要全局时间视野的复杂模式。此外，得益于 EnCodec 的高压缩率与多层表示，AudioGen 生成的音频在保真度上优于同时期的离散扩散方法。
+
+在文本理解方面，AudioGen 采用 T5 而非 CLIP 作为文本编码器，体现了“文本中心主义”的早期萌芽。T5 的语言理解能力使模型能够解析相对复杂的空间关系和属性描述（如“左边传来狗吠声，右边是流水声”），这是 CLIP 对比学习范式难以精细捕获的。
+
+\subsubsection{局限性分析}
+然而，AudioGen 也承受着自回归范式与生俱来的结构性代价。第一，推理速度瓶颈：自回归生成必须逐 Token 串行产出，序列长度达数千步时，即使使用 KV 缓存优化，生成一段 10 秒音频所需的时间仍然显著长于扩散模型的并行采样。第二，错误累积与漂移：早期步骤中的微小预测偏差会在后续自回归过程中被不断放大，导致生成音频出现逻辑断崖——前半段语义清晰而后半段蜕变为无意义的噪声。第三，离散化信息损失的阴影依然存在：EnCodec 虽比单纯 VQ-VAE 表现更佳，但其对某些特定声学纹理（如金属碰撞的余音、雨滴的不规则散落）的保真度仍有明显上限。这些问题使得学术界的目光进一步投向了连续潜在空间扩散模型的可能性。
+
+\subsection{潜在空间革命：AudioLDM}
+
+\textbf{AudioLDM} 由 Liu 等人于 2023 年在 ICML 发表，堪称 TTA 领域的 Stable Diffusion 时刻。它从根本上放弃了离散 Token 范式，将“潜在扩散模型”（Latent Diffusion Models, LDM）完整迁移到音频域，构建了一套优雅的连续空间生成框架。
+
+\subsubsection{模型原理与架构}
+AudioLDM 的整体架构为清晰的三段式设计，各组件分工明确且可独立训练：
+
+\textbf{第一阶段：音频连续 VAE。} AudioLDM 训练一个基于 VAE 的变体，将高维音频梅尔频谱 \(X \in \mathbb{R}^{T \times F}\) 压缩至低维连续潜在表示 \(Z = \mathcal{E}(X) \in \mathbb{R}^{t \times f \times c}\)，其中 \(t \ll T, f \ll F\)。与 VQ-VAE 的离散化不同，该 VAE 的隐变量保持为连续实数向量，因此不存在信息瓶颈导致的细节丢失。解码器 \(\mathcal{D}\) 负责从潜在表示重建梅尔频谱。通过引入对抗损失和感知损失来增强重建质量，该 VAE 能够以极高的保真度恢复出原始频谱的精细结构。
+
+\textbf{第二阶段：CLAP 语义对齐。} AudioLDM 引入 CLAP 模型作为文本与音频之间的语义桥梁。CLAP 通过双塔对比学习，将文本和对应音频分别映射到共享的嵌入空间。训练完成后，给定任意文本描述 \(y\)，CLAP 的文本编码器输出一个固定维度的语义嵌入向量 \(E_{\text{text}}(y) \in \mathbb{R}^d\)，该向量封装了文本所描述的声学场景的全局语义特征。
+
+\textbf{第三阶段：潜在空间条件扩散。} 这是生成的核心引擎。AudioLDM 在 VAE 的连续潜在空间中训练一个基于 U-Net 的条件 DDPM。具体而言，它将经过扩散加噪的潜在表示 \(Z_t\)、时间步 \(t\) 以及 CLAP 文本嵌入 \(E_{\text{text}}(y)\) 作为输入，通过交叉注意力层将文本条件注入 U-Net 的各层级，预测所添加的噪声，从而实现条件去噪。训练目标沿用 DDPM 的简化噪声预测损失：
+\begin{equation}
+\mathcal{L}_{\text{LDM}} = \mathbb{E}_{\mathcal{E}(X), y, \epsilon \sim \mathcal{N}(0,1), t} \big[ \| \epsilon - \epsilon_\theta(Z_t, t, E_{\text{text}}(y)) \|_2^2 \big]
+\end{equation}
+
+AudioLDM 最具颠覆性的设计在于其\textbf{无监督预训练策略}。由于 CLAP 的对比预训练可以使用任意音频-文本对（甚至是不完美对齐的网络爬取数据），而 VAE 的重建训练完全不需要文本标注，扩散模型的训练也仅依赖 VAE 潜在空间与 CLAP 嵌入，因此整个系统可以在海量无标注音频上进行预训练，仅在少量精细标注数据上进行微调。这极大地缓解了 TTA 领域标注数据稀缺的根本性难题。
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 3: AudioLDM 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{AudioLDM 模型整体架构：VAE压缩至连续潜在空间，CLAP提供语义条件，潜在扩散模型执行条件生成。（图片待插入）}
+\label{fig:audioldm}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+AudioLDM 的贡献是多维度的。第一，连续潜在空间范式的确立：它用实证表明，在音频生成中，保留隐空间中的连续细微梯度波动对于高保真音频重现至关重要，彻底扭转了早期 TTA 研究对离散 Token 的路径依赖。第二，CLAP 驱动的无监督生成：通过将语义对齐与声学生成解耦——CLAP 负责跨模态映射，VAE 负责音频压缩，LDM 负责条件合成——AudioLDM 实现了模块化的优雅架构，各组件可独立扩展与替换。第三，数据效率的飞跃：在海量无标注音频上预训练、少量成对数据上微调的策略，使其在数据受限场景下仍能表现出色，极大降低了 TTA 技术的入门门槛。
+
+\subsubsection{局限性分析}
+AudioLDM 的局限主要源自其采用的 CLAP 语义编码方式。CLAP 本质是一个全局对比模型——它学习的是整个文本与整个音频之间的“整体匹配度”，输出的嵌入向量是单个固定维度的全局表征。当面对具有复杂时序结构的文本描述（如“先是清脆的鸟鸣，然后远处传来隆隆雷声，最后雨声淅沥落下”）时，单个全局向量难以充分编码事件之间的先后顺序、持续时长和逻辑关系。生成的音频往往在整体语义轮廓上正确，但在事件的时序细节上出现偏差——鸟鸣与雷声可能同时发生，或先后顺序颠倒。这一根本性局限，恰恰是后续 Tango 模型得以异军突起的逻辑起点。
+
+\subsection{多模态联合语义升华：AudioLDM 2}
+
+\textbf{AudioLDM 2} 由 Liu 等人在 2024 年推出，延续 AudioLDM 的潜在扩散框架，但在条件建模维度上实现了质的飞跃——从“单一 CLAP 全局嵌入”进化为“多源异构语义的联合蒸馏”。
+
+\subsubsection{模型原理与架构}
+AudioLDM 2 保留了前代的三段式结构基础（VAE 压缩 + 语义条件 + 潜在扩散生成），但在语义条件模块引入了全新的“音频语言模型”（Language of Audio, LOA）设计思想。传统的 AudioLDM 仅将 CLAP 文本嵌入作为唯一的条件信号，而 LOA 框架则试图构建更为丰富的复合语义表示。
+
+具体而言，LOA 将多种来源的异构嵌入进行统一拼接或加和，形成一条“超语义 Token 序列”：
+\begin{itemize}
+    \item \textbf{CLAP 嵌入：} 捕获文本与音频之间的全局语义对齐，延续前代的跨模态映射能力。
+    \item \textbf{音频自监督嵌入：} 使用预训练的音频自监督模型（如 BEATs 或 wav2vec 2.0）从参考音频中提取的深层表征，携带着关于音色、韵律、环境特征等丰富声学细节。
+    \item \textbf{文本语言模型嵌入：} 引入 FLAN-T5 等大语言模型的文本编码能力，弥补 CLAP 在复杂语言理解和时序逻辑推理上的短板。
+    \item \textbf{结构化声学特征：} 如基频（F0）、响度包络等音高与能量轨迹，为生成过程提供明确的声学参数控制。
+\end{itemize}
+
+这组多样化的嵌入被拼接为一个复合条件序列 \(C = [c_1, c_2, \dots, c_K]\)，随后在潜在扩散模型的 U-Net 中通过交叉注意力机制对去噪过程进行逐层条件引导。由于条件序列包含了丰富的多模态信息，U-Net 可以在不同时间步、不同网络层级自主“关注”与当前去噪需求最相关的语义维度。
+
+LOA 的训练采用了“生成式预训练 + 任务微调”的策略：首先使用大规模无标注音频自监督地训练 LOA 内部的时序建模能力（类似于语言模型的预训练），再通过少量成对数据微调其跨模态映射能力。
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 4: AudioLDM 2 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{AudioLDM 2 模型整体架构：LOA框架融合多源异构嵌入形成复合语义Token序列，引导潜在扩散生成。（图片待插入）}
+\label{fig:audioldm2}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+AudioLDM 2 的核心突破在于将 TTA 的条件机制从“单一静态嵌入”升级为“多模态动态序列”。这一转变带来了两个层面的关键增益：
+
+第一，\textbf{多模态联合理解}。LOA 将文本语义（来自 CLAP / T5）与声学细节（来自音频自监督嵌入）融合为统一的条件表示，使模型能够执行此前难以实现的“文本 + 参考音频”混合条件生成。例如，用户可以输入文本描述“雨天的街道”并同时提供一段汽车引擎的参考音频，模型将生成融合两者的声景——这是单纯的文本到音频模型不可企及的灵活性。
+
+第二，\textbf{零样本风格迁移与翻译}。借助 LOA 中的音频自监督嵌入，AudioLDM 2 展现出了强大的零样本能力：提供一段源音频，模型可以将其“翻译”为新文本描述的风格变体，而无需在特定风格数据上进行额外训练。这使得 AudioLDM 2 在音效设计、声音后期处理等需要灵活操控的创作场景中具备显著优势。
+
+\subsubsection{局限性分析}
+AudioLDM 2 的架构复杂度显著提升，多源嵌入的协调训练涉及更复杂的损失平衡和超参数调节。此外，尽管 LOA 部分缓解了纯 CLAP 的时序信息瓶颈，但其对具有严格时间逻辑的长序列事件的生成精度，与后文将讨论的 Tango 模型相比仍有一定差距——因为 LOA 的条件序列虽为“序列”形式，却并非严格对齐于音频的时间轴，其对时序关系的建模仍是隐式而非显式的。
+
+\subsection{高保真极致优化：Make-An-Audio}
+
+\textbf{Make-An-Audio} 由 Huang 等人于 2023 年在 ICML 发表，在 AudioLDM 奠定的潜在扩散框架之上，从数据增广、频谱重建质量和采样加速三个工程优化维度发起了系统性冲击。
+
+\subsubsection{模型原理与架构}
+Make-An-Audio 保留了“文本编码 + 频谱 VAE + 条件扩散”的宏观骨架，但在每一环节都施加了精微的手术刀式改进。
+
+\textbf{第一，伪提示增强（Pseudo-Prompt Enhancement）。} Make-An-Audio 最为巧妙的创新在于训练数据的语义密度提升策略。在训练阶段，对于每一条简短的人工标注文本（如“鸟鸣”），模型调用一个外部冻结的大型语言模型（如 GPT 或 T5）自动生成多条语义扩充变体（如“清晨树林中清脆悦耳的鸟鸣声”、“远处传来稀疏的鸟叫声伴随着微风”）。这些变体与原始标注构成正例对，同时随机采样其他音频的标注作为负例。扩充后的数据集蕴含着远为丰富的语义变化梯度，使模型能够从有限的原始标注中蒸馏出更深层的文本-音频映射关系。值得注意的是，这一增强仅在训练时执行，推理时用户仍可直接输入简短描述，模型通过训练中习得的泛化能力来“补全”语义。
+
+\textbf{第二，连续频谱自编码器。} 与 DiffSound 的 VQ-VAE 离散路径划清界限，Make-An-Audio 严格采用连续频谱自编码器：编码器将梅尔频谱映射为连续潜在表示，解码器直接从连续潜在向量重建频谱。这一设计从根本上杜绝了离散量化带来的“阶梯效应”——在频谱的高频区域，离散化往往使谐波结构出现人工的阶梯状失真，而连续潜在空间能够自然地保留平滑的谐波过渡和瞬态冲击的锐利前沿。配合对抗训练和基于预训练音频分类器的感知损失，连续频谱自编码器在客观指标（如重建 STFT 误差）和主观听觉测试中均表现出优于 VQ-VAE 的保真度。
+
+\textbf{第三，采样蒸馏加速。} 扩散模型的标准推理需要数百甚至上千次迭代去噪，这对实际的交互式创作场景构成严重阻碍。Make-An-Audio 引入了基于扩散蒸馏的步数缩减技术（Distillation-based Few-step Sampling）：通过训练一个学生模型来拟合教师模型的多步去噪轨迹，将推理步数从百余步压缩至 10 至 20 步，在几乎不损失感知音频质量的前提下实现了量级式的速度飞跃。
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 5: Make-An-Audio 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{Make-An-Audio 模型整体架构：伪提示增强扩充训练数据，连续频谱自编码器保证高保真重建，蒸馏技术加速采样。（图片待插入）}
+\label{fig:makeanaudio}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+Make-An-Audio 的贡献集中于“在既定框架下的极致工程优化”，三个创新点各具锋芒：伪提示增强展示了利用外部大语言模型弥补训练数据稀疏性的巧妙思路——用“软数据增广”替代了昂贵的人工重标注；连续频谱自编码器以实验证据确证了“在音频生成中，连续空间优于离散空间”的假说；采样蒸馏则直面扩散模型的实用性瓶颈，为实时或准实时的交互式音频生成应用扫清了主要性能障碍。
+
+\subsubsection{局限性分析}
+Make-An-Audio 本质上是对 AudioLDM 框架的优化与加固，而非范式颠覆。其文本语义理解仍主要依赖 CLAP 嵌入，前文讨论的时序逻辑解析能力不足的问题在此依然存在。此外，伪提示增强依赖于外部大语言模型的质量，若扩充生成的文本出现语义漂移或与音频实际内容不匹配，反而可能引入训练噪声。
+
+\subsection{从生成到编辑：Make-An-Audio 2}
+
+\textbf{Make-An-Audio 2} 在同年的后续工作中将研究重心从生成质量本身郑重转向了“可控性与可编辑性”，试图赋予 TTA 模型在生成后对音频进行局部微调的能力。
+
+\subsubsection{模型原理与架构}
+Make-An-Audio 2 的技术根基仍是连续潜在空间扩散模型，但其关键贡献在于提出了一种推理时即插即用的\textbf{谱图噪声潜变量操控技术}（Spectrogram Latent Manipulation）。该方法无需重新训练模型，而是利用扩散模型的迭代去噪特性，在推理过程中对中间噪声潜变量进行定向干预。
+
+具体操作分为两种范式：
+
+\textbf{第一，局部潜变量替换（Latent Replacement）。} 在扩散模型的逆向去噪过程中，对于某个中间时间步的噪声潜变量 \(Z_t\)，用户可以指定其某一局部区域（对应音频的特定时间-频率块），并将该区域的值替换为从一段参考音频的对应时间步潜变量中提取的相应区域值。剩余区域保持原样。随后继续去噪过程，最终生成的音频将在被替换的区域呈现出参考音频的声学特征，而其余区域保持原有生成内容。这实现了“在生成的雨声背景中，将其中一段替换为雷声”式的局部精确编辑。
+
+\textbf{第二，语义区域插值与混合。} 通过线性插值两个不同文本条件引导的噪声潜变量，模型可以生成介于两种语义之间的平滑过渡音频。例如，在“城市街道”和“森林鸟鸣”的潜变量之间插值，可以产生一段从城市环境渐变过渡到森林环境的连续声景。
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 6: Make-An-Audio 2 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{Make-An-Audio 2 潜变量操控技术：推理时通过局部替换或插值实现对生成音频的精细可控编辑。（图片待插入）}
+\label{fig:makeanaudio2}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+Make-An-Audio 2 的核心突破在于将 TTA 推向了“后期创作工具”的维度。在此前所有模型中，生成是一次性的黑箱过程：用户输入文本、获得音频、若不满意只能修改文本重新生成。Make-An-Audio 2 的潜变量操控则打破了这一局限，使用户能够像操作图像编辑软件的图层和笔刷那样对声音进行非破坏性的局部修整。这种人机循环（Human-in-the-Loop）创作范式的建立，对于 TTA 从学术演示走向专业音效生产实践至关重要。
+
+\subsubsection{局限性分析}
+潜变量操控的精密度受限于扩散模型的潜在空间分辨率和去噪轨迹的线性假设。局部替换在区域边界上可能产生听觉伪影（类似图像编辑中的拼接接缝），而语义插值的自然度也因语义对之间实际声学距离的差异而参差不齐。此外，该方法对用户操作技巧有一定要求——选择合适的替换时间步和区域尺寸需要经验积累。
+
+\subsection{指令遵循与时序逻辑：Tango}
+
+\textbf{Tango} 由 Ghosal 等人于 2023 年提出，采取了与上述所有基于 CLAP 的模型截然不同的设计哲学。它的追求凝练为四个字：“唯命是从”——精准遵循包含复杂时序逻辑的文本指令。
+
+\subsubsection{模型原理与架构}
+Tango 的架构在宏观层面与 AudioLDM 共享潜在扩散骨架（VAE 压缩 + 条件扩散 U-Net 生成），但在文本编码器的选择上做出了根本性决裂：它完全抛弃了 CLAP，转而使用一个被冻结参数的、指令微调后的超大规模语言模型 Flan-T5 作为唯一的文本编码器。
+
+Flan-T5 是 Google 基于 T5 模型在百余个 NLP 任务上进行指令微调得到的增强版本，具备极强的语言理解、常识推理和指令遵循能力。在 Tango 中，给定文本描述 \(y\)，Flan-T5 编码器产生一组变长的文本嵌入序列 \(H_{\text{text}}(y) = [h_1, h_2, \dots, h_N] \in \mathbb{R}^{N \times d}\)。不同于 CLAP 的单个全局嵌入向量，Flan-T5 的输出保留了文本的序列结构——句中每个词或子词单元都有对应的嵌入表示。这一序列化的文本表征被逐位通过交叉注意力注入潜在扩散 U-Net 的各层。
+
+训练时，Flan-T5 参数完全冻结，仅更新 VAE 和扩散 U-Net。这一设计确保了大语言模型的知识不被灾难性遗忘，也显著降低了训练计算开销——语言模型的庞大参数量无需参与反向传播。Tango 的训练目标与 AudioLDM 形式一致，仍为潜在空间中的噪声预测损失，但条件信号从 \(E_{\text{text}}(y)\) 变为序列 \(H_{\text{text}}(y)\)：
+\begin{equation}
+\mathcal{L}_{\text{Tango}} = \mathbb{E}_{\mathcal{E}(X), y, \epsilon, t} \big[ \| \epsilon - \epsilon_\theta(Z_t, t, H_{\text{text}}(y)) \|_2^2 \big]
+\end{equation}
+
+\begin{figure}[htbp]
+\centering
+\framebox[\textwidth][c]{
+    \parbox{0.85\textwidth}{\centering \vspace{3cm}
+    \textcolor{gray}{\large 【图 7: Tango 模型整体架构】}
+    \vspace{3cm}}
+}
+\caption{Tango 模型整体架构：冻结的Flan-T5提供序列化文本嵌入，潜在扩散U-Net执行条件生成。（图片待插入）}
+\label{fig:tango}
+\end{figure}
+
+\subsubsection{突破点与创新点}
+Tango 的突破既是技术路线的也是认识论的。在技术层面，它率先将指令微调大语言模型（Flan-T5）系统性地引入 TTA，实证了序列化文本嵌入对于捕捉时序逻辑关系的决定性优势。CLAP 的全局嵌入将整句语义压缩为单一点向量，时序信息在此挤压过程中高度损失；而 Flan-T5 为每个词独立生成嵌入，扩散 U-Net 的交叉注意力可以在生成频谱的不同时间区间上“关注”到不同的文本单元，从而编码“先A后B”的时序结构。
+
+在认识论层面，Tango 传递了一个重要判断：当大语言模型自身的语言理解能力足够强大时，通过“文本中心”路线直接将丰富语义注入生成模型，可能比专门为跨模态对齐而训练的 CLAP 更加贴近复杂人类指令的精髓。Tango 在具有严格时序依赖的生成设置中（如“先是流畅的吉他独奏，紧接着一阵掌声响起”），展现出显著优于同期 CLAP 路线模型的时序逻辑保真度，成为“唯命是从”理念的有力证明。
+
+\subsubsection{局限性分析}
+Tango 的代价同样清晰。其一，Flan-T5 虽强，但本质是纯文本模型，缺乏对声学世界的具身认知——它理解“响亮”的词义，却无法像 CLAP 那样真正“感知”响度在频谱上的对应模式。这意味着 Tango 的跨模态对齐完全由扩散 U-Net 在交叉注意力中自主习得，数据需求相应增加。其二，冻结 Flan-T5 保证了训练效率，但也意味着语言模型的知识止步于其预训练截止日，无法随音频领域知识的更新而演进。其三，Tango 对长文本依赖强、短文本表现未必优于 CLAP 模型——当用户仅输入“鸟叫”两个词时，序列化嵌入的时序建模优势无从发挥，反而可能因单一词嵌入的信息密度不足而弱于全局 CLAP 嵌入的匹配精度。
+% -----------------------------------------------------------
+% 4 技术演进趋势的思辨
+% -----------------------------------------------------------
+\section{技术演进趋势的思辨}
+
+通过上述从 DiffSound 到 Tango 的纵向技术剖析，我们已然可以凝练出三条深刻的宏观演进主线，它们不仅揭示了当前 TTA 研究的内在规律，也为后继研究者提供了隐性的方向指南。
+
+\textbf{第一，表征空间从“离散”走向“连续”。} 早期方法（DiffSound, AudioGen）忠实于 VQ-VAE 范式，依赖离散码本和自回归语言模型。然而，音频的高信息密度使得离散化极易成为信息瓶颈，尤其在表现环境声和音乐的高频泛音细节时会出现“糊化”和机械感。AudioLDM 引领的潜在连续扩散范式证明了：保留连续隐空间中的细微梯度波动对于高保真音频的重现至关重要。Make-An-Audio 的连续频谱自编码器进一步确证了这一点。连续潜在空间在当下已从一种“可选方案”上升为高音质生成的质量基座。
+
+\textbf{第二，语义对齐从“单一桥接”走向“多模态联合蒸馏”。} AudioLDM 最初依靠 CLAP 完成单一的文本-音频全局对齐；而 AudioLDM 2 的 LOA 则展示了融合文本、音频、语音等多源嵌入的潜力。生成模型的条件信号正在从一维向量演化为复合语义序列。同时，Tango 的“文本中心”路线又提供了另一种视角：当语言模型自身足够智慧时，多模态对齐可以被“内化”在生成模型的交叉注意力之中。未来的模型将极有可能是“强文本编码器 + 多模态条件注入”的杂交体——既拥有 CLAP 的声学感知，又具备 Flan-T5 的语言推理，两者优势互补。
+
+\textbf{第三，生成逻辑从“轮廓复现”走向“时序推理与可控创作”。} 生成一段整体上“听起来差不多”的音频已不再是瓶颈。学术界及工业界的焦点已然转向：模型是否能准确理解长文本中的动作顺序和空间关系（Tango 的突破）？是否能允许用户在生成后进行非破坏性的局部编辑（Make-An-Audio 2 的潜变量操控）？音频生成正迅速从“自动拟音工具”向具有精准逻辑推理的“声音智能体”演化，可控性和可编辑性是技术下沉到专业创作软件的必要前提。
+
+% -----------------------------------------------------------
+% 5 应用前景与挑战
+% -----------------------------------------------------------
+\section{应用前景与挑战}
+
+\subsection{广阔的应用图景}
+TTA 技术的底层突破将颠覆以音频为核心的传统内容产业。在\textbf{影视与游戏工业}中，音效师将从浩瀚的素材库寻找转向直接输入分镜文本生成原型声景，大幅压缩后期制作成本；在\textbf{增强现实与元宇宙}中，TTA 将使虚拟环境具备随用户视点移动和场景变化而实时重构的空间化音效，实现真正的沉浸体验；在\textbf{无障碍视听辅助}上，未来的导盲设备或智能眼镜可整合 TTA 模块，将采集到的环境视觉信息转化为实时、自然的环境声景与语音描述，为视障人士构建前所未有的空间认知通道。
+
+此外，音乐创作、有声内容生产、心理疗愈声音场景定制等细分方向，也将在高可控 TTA 的加持下打开全新的创作者经济蓝海。
+
+\subsection{当前面临的挑战}
+尽管进步显著，TTA 从学术玩具落地为标准产品之间仍横亘着多重障碍。其一，\textbf{数据版权与伦理风险}：主流训练集如 AudioSet、AudioCaps 中的部分音频存在版权疑云，由其训练所得的模型生成内容是否构成“衍生作品”仍属于法律与伦理的灰色地带。其二，\textbf{精细尺度可控性的匮乏}：在粗粒度语义上（“有鸟叫”和“没有鸟叫”）模型已有较好表现，但若进一步要求“黄鹂在 5 米高的树枝上鸣叫，声音圆润且带金属尾音”，目前还没有模型能够可靠解耦并复现如此精细的物理材质与空间参数。其三，\textbf{标准化评估体系的缺位}：现有评估仍高度依赖 FAD 和 KL 散度等客观指标，但它们与人类对声音的自然度、沉浸感和语义匹配度等主观判断之间的相关性并不完美。一个面向声景生成、被学术共同体公认的感知质量基准与主观评估协议亟待建立。
+
+% -----------------------------------------------------------
+% 6 结论
+% -----------------------------------------------------------
+\section{结论}
+
+本文以文本到音频生成为技术切面，完成了从基础生成理论到七款前沿 TTA 模型的全面系统调研。从 DDPM 的缜密去噪原理，到 VQ-VAE 的离散压缩艺术，从 AudioLDM 优雅的潜在扩散三段式，再到 Tango 将指令型大语言模型化作逻辑对齐之剑，清晰地描绘出一条“高保真、强可控、深理解”的演进曲线。TTA 不仅构成了人工智能从视觉、语言向听觉多模态版图扩张的关键拼图，更预示了未来内容生产从手动操作向自然语言式对话的根本范式转移。可以预见，随着基础算力增长、多模态基础模型的深度融合以及标准化评估基准的建立，不久的将来，一个“人人皆是声音设计师”、机器能真切听懂并描绘世界的时代将真正到来。
+
+% -----------------------------------------------------------
+% 参考文献
+% -----------------------------------------------------------
+\begin{thebibliography}{99}
+
+\bibitem{ddpm} Ho, J., Jain, A., \& Abbeel, P. (2020). Denoising diffusion probabilistic models. \textit{Advances in Neural Information Processing Systems}.
+
+\bibitem{vqvae} Van Den Oord, A., \& Vinyals, O. (2017). Neural discrete representation learning. \textit{Advances in Neural Information Processing Systems}.
+
+\bibitem{clip} Radford, A., Kim, J. W., Hallacy, C., et al. (2021). Learning transferable visual models from natural language supervision. \textit{ICML}.
+
+\bibitem{transformer} Vaswani, A., Shazeer, N., Parmar, N., et al. (2017). Attention is all you need. \textit{Advances in Neural Information Processing Systems}.
+
+\bibitem{t5} Raffel, C., Shazeer, N., Roberts, A., et al. (2020). Exploring the limits of transfer learning with a unified text-to-text transformer. \textit{Journal of Machine Learning Research}.
+
+\bibitem{audoldm} Liu, H., Chen, Z., Yuan, Y., et al. (2023). AudioLDM: Text-to-Audio Generation with Latent Diffusion Models. \textit{ICML}.
+
+\bibitem{audoldm2} Liu, H., Yuan, Y., Liu, X., et al. (2024). AudioLDM 2: Learning Holistic Audio Generation with Self-supervised Pretraining. \textit{IEEE/ACM Transactions on Audio, Speech, and Language Processing}.
+
+\bibitem{make_audio} Huang, R., Huang, J., Yang, D., et al. (2023). Make-An-Audio: Text-To-Audio Generation with Prompt-Enhanced Diffusion Models. \textit{ICML}.
+
+\bibitem{make_audio2} Huang, R., Huang, J., Yang, D., et al. (2023). Make-An-Audio 2: Temporal-Enhanced Text-to-Audio Generation. \textit{arXiv preprint}.
+
+\bibitem{audiogen} Kreuk, F., Synnaeve, G., Polyak, A., et al. (2023). AudioGen: Textually Guided Audio Generation. \textit{ICLR}.
+
+\bibitem{tango} Ghosal, D., Majumder, N., Mehrish, A., et al. (2023). Text-to-Audio Generation using Instruction-Tuned LLM and Latent Diffusion Model. \textit{arXiv preprint}. (Tango)
+
+\bibitem{diffsound} Yang, D., Yu, J., Wang, H., et al. (2023). Diffsound: Discrete Diffusion Model for Text-to-sound Generation. \textit{IEEE/ACM Transactions on Audio, Speech, and Language Processing}.
+
+\bibitem{vae} Kingma, D. P., \& Welling, M. (2014). Auto-encoding variational bayes. \textit{ICLR}.
+
+\bibitem{d3pm} Austin, J., Johnson, D. D., Ho, J., et al. (2021). Structured denoising diffusion models in discrete state spaces. \textit{Advances in Neural Information Processing Systems}.
+
+\end{thebibliography}
+
+\end{document}

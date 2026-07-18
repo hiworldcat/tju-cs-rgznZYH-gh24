@@ -1,0 +1,47 @@
+[
+  {
+    "file_name": "steps20_guidance6.5.png",
+    "steps": 20,
+    "guidance_scale": 6.5
+  },
+  {
+    "file_name": "steps20_guidance8.0.png",
+    "steps": 20,
+    "guidance_scale": 8.0
+  },
+  {
+    "file_name": "steps20_guidance10.0.png",
+    "steps": 20,
+    "guidance_scale": 10.0
+  },
+  {
+    "file_name": "steps30_guidance6.5.png",
+    "steps": 30,
+    "guidance_scale": 6.5
+  },
+  {
+    "file_name": "steps30_guidance8.0.png",
+    "steps": 30,
+    "guidance_scale": 8.0
+  },
+  {
+    "file_name": "steps30_guidance10.0.png",
+    "steps": 30,
+    "guidance_scale": 10.0
+  },
+  {
+    "file_name": "steps40_guidance6.5.png",
+    "steps": 40,
+    "guidance_scale": 6.5
+  },
+  {
+    "file_name": "steps40_guidance8.0.png",
+    "steps": 40,
+    "guidance_scale": 8.0
+  },
+  {
+    "file_name": "steps40_guidance10.0.png",
+    "steps": 40,
+    "guidance_scale": 10.0
+  }
+]

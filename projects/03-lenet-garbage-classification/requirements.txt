@@ -1,0 +1,4 @@
+mindspore==2.9.0
+numpy
+pillow
+tqdm
